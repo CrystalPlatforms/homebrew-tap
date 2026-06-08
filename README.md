@@ -1,2 +1,0 @@
-# homebrew-tap
-adm-cli
