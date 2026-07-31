@@ -1,0 +1,71 @@
+name: bump-formula
+
+# Auto-sync formuły: utrzymuje adm.rb zsynchronizowaną z najnowszą wersją
+# @crystalplatforms/adm na npm. Uruchamiany co 6h oraz ręcznie (workflow_dispatch),
+# np. zaraz po `npm publish`. Pobiera wersję latest + sha256 tarballa i nadpisuje
+# url/sha256 w adm.rb. Brak PAT — działa w obrębie tego samego repo (GITHUB_TOKEN).
+
+on:
+  schedule:
+    - cron: '17 */6 * * *' # co 6h (off-minute — unika ruchu o pełnych godzinach)
+  workflow_dispatch: # ręczny bump na żądanie
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap
+        uses: actions/checkout@v4
+
+      - name: Pobierz najnowszą wersję z npm + sha256 tarballa
+        id: npm
+        run: |
+          set -euo pipefail
+          PKG="@crystalplatforms/adm"
+          VER=$(curl -fsSL "https://registry.npmjs.org/${PKG}/latest" | jq -r '.version')
+          TARBALL="https://registry.npmjs.org/${PKG}/-/adm-${VER}.tgz"
+          SHA=$(curl -fsSL "$TARBALL" | sha256sum | awk '{print $1}')
+          {
+            echo "version=${VER}"
+            echo "sha256=${SHA}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Najnowsza wersja na npm: ${VER}"
+
+      - name: Porównaj z wersją w adm.rb
+        id: check
+        run: |
+          set -euo pipefail
+          CURRENT=$(grep -oE 'adm-[0-9]+\.[0-9]+\.[0-9]+\.tgz' adm.rb | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+          NEW="${{ steps.npm.outputs.version }}"
+          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+          if [ "${CURRENT}" = "${NEW}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Formuła już w wersji ${CURRENT} — pomijam."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Bump ${CURRENT} -> ${NEW}"
+          fi
+
+      - name: Aktualizuj adm.rb (url + sha256)
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          VER="${{ steps.npm.outputs.version }}"
+          SHA="${{ steps.npm.outputs.sha256 }}"
+          perl -0pi -e 's|url "[^"]*"|url "https://registry.npmjs.org/@crystalplatforms/adm/-/adm-'"${VER}"'.tgz"|' adm.rb
+          perl -0pi -e 's|sha256 "[a-f0-9]{64}"|sha256 "'"${SHA}"'"|' adm.rb
+          echo "--- adm.rb po zmianie ---"
+          cat adm.rb
+
+      - name: Commit + push
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          git config user.name "MrCrystal2"
+          git config user.email "Admixkrol@icloud.com"
+          git add adm.rb
+          git commit -m "chore: bump adm formula to ${{ steps.npm.outputs.version }} (auto-sync)"
+          git push
