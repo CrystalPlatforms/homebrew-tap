@@ -1,18 +1,37 @@
 class Adm < Formula
-  desc "ADM developer CLI — environment setup, GitHub integration, and AI-powered assistant"
+  desc "ADM — lightweight, multi-platform developer environment installer"
   homepage "https://github.com/CrystalPlatforms/ADM-CLI"
-  url "https://registry.npmjs.org/@crystalplatforms/adm/-/adm-0.2.3.tgz"
-  sha256 "e4ca3cf620e69ecff027d7d51bbbcf2eead9aa48b44543e6ea0381b9dc72e9a2"
+  version "0.4.0"
   license "MIT"
 
-  depends_on "node"
+  # Portable bundles: each ships ADM (app/) and a private Node runtime,
+  # so no system Node dependency is needed.
+  on_arm do
+    url "https://github.com/CrystalPlatforms/ADM-CLI/releases/download/v#{version}/adm-v#{version}-darwin-arm64.tar.gz"
+    sha256 "81aaf09a62e3227dea8a08fb35b74b939bc68cea61f322c00f23d34aece991c2"
+  end
+  on_intel do
+    url "https://github.com/CrystalPlatforms/ADM-CLI/releases/download/v#{version}/adm-v#{version}-darwin-x64.tar.gz"
+    sha256 "39d85c821884c40b89bc6d80f25aa0baaf67353abed5b07c023a7a6eb9c3ddf1"
+  end
 
   def install
-    system "npm", "install", *std_npm_args
-    bin.install_symlink libexec.glob("bin/*")
+    # Install the whole portable bundle (app + private Node runtime).
+    libexec.install Dir["*"]
+    # Wrapper that runs adm under the bundled private Node.
+    (bin/"adm").write <<~EOS
+      #!/bin/sh
+      exec "#{libexec}/runtime/bin/node" "#{libexec}/app/bin/adm" "$@"
+    EOS
+  end
+
+  def caveats
+    <<~EOS
+      ADM ships its own Node runtime — no system Node is required.
+    EOS
   end
 
   test do
-    assert_match version.to_s, shell_output("#{bin}/adm --version")
+    assert_match version.to_s, shell_output("#{bin}/adm -v")
   end
 end
